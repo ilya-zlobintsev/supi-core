@@ -1,21 +1,12 @@
-/**
- * Represents a bot command.
- * @memberof sb
- * @type Command
- */
+const fs = require("fs");
+const path = require("path");
+
 module.exports = class Command extends require("./template.js") {
 	//<editor-fold defaultstate="collapsed" desc="=== INSTANCE PROPERTIES ===">
 
 	/**
-	 * Unique numeric ID.
-	 * If the command is anonymous, a Symbol() takes its place.
-	 * @type {number|symbol}
-	 */
-	ID;
-
-	/**
-	 * Unique command name.
-	 * @type {string}
+	 * Unique string command name, or symbol if anonymous.
+	 * @type {string|symbol}
 	 */
 	Name;
 
@@ -73,28 +64,24 @@ module.exports = class Command extends require("./template.js") {
 	// </editor-fold>
 
 	static #privateMessageChannelID = Symbol("private-message-channel");
-	static #serializableProperties = {
-		Name: { type: "string" },
-		Aliases: { type: "descriptor" },
-		Author: { type: "string" },
-		Cooldown: { type: "descriptor" },
-		Description: { type: "string" },
-		Flags: { type: "json" },
-		Whitelist_Response: { type: "string" },
-		Static_Data: { type: "descriptor" },
-		Code: { type: "descriptor" },
-		Dynamic_Description: { type: "descriptor" }
-	};
 
 	constructor (data) {
 		super();
 
-		this.ID = data.ID ?? Symbol();
-
-		this.Name = data.Name;
-		if (typeof this.Name !== "string" || this.Name.length === 0) {
-			console.error(`Command ID ${this.ID} has an unusuable name`, data.Name);
-			this.Name = ""; // just a precaution so that the command never gets found out
+		this.Name = data.Name ?? Symbol();
+		if (typeof this.Name !== "string" || typeof this.Name !== "symbol") {
+			throw new sb.Error({
+				message: "Command name must be a string (if proper) or symbol (if anonymous)",
+				args: {
+					name: String(this.Name),
+					type: typeof this.Name
+				}
+			});
+		}
+		else if (typeof this.Name === "string" && this.Name.length === 0) {
+			throw new sb.Error({
+				message: "Command name cannot be an empty string"
+			});
 		}
 
 		if (data.Aliases === null) {
@@ -150,7 +137,7 @@ module.exports = class Command extends require("./template.js") {
 			this.Code = eval(data.Code);
 		}
 		catch (e) {
-			console.error(`Command ${this.ID} has invalid code definition!`, e);
+			console.error(`Command ${this.Name} has invalid code definition!`, e);
 			this.Code = async () => ({
 				success: false,
 				reply: "Command has invalid code definition! Please make sure to let @supinic know about this!"
@@ -178,7 +165,7 @@ module.exports = class Command extends require("./template.js") {
 				this.staticData = tempData;
 			}
 			else {
-				console.warn(`Command ${this.ID} has invalid static data type!`, e);
+				console.warn(`Command ${this.Name} has invalid static data type!`, e);
 				this.Code = async () => ({
 					success: false,
 					reply: "Command has invalid code definition! Please make sure to let @supinic know about this!"
@@ -209,93 +196,92 @@ module.exports = class Command extends require("./template.js") {
 		return this.Code(...args);
 	}
 
-	async serialize (options = {}) {
-		if (typeof this.ID !== "number") {
-			throw new sb.Error({
-				message: "Cannot serialize an anonymous Command",
-				args: {
-					ID: this.ID,
-					Name: this.Name
-				}
-			});
-		}
-
-		const row = await sb.Query.getRow("chat_data", "Command");
-		await row.load(this.ID);
-
-		return await super.serialize(row, Command.#serializableProperties, options);
-	}
-
 	getCacheKey () {
-		return `sb-command-${this.ID}`;
+		return `sb-command-${this.Name}`;
 	}
 
 	get Author () { return this.#Author; }
 
 	static async loadData () {
-		const data = await sb.Query.getRecordset(rs => rs
-			.select("*")
-			.from("chat_data", "Command")
-			.where("Flags NOT %*like* OR Flags IS NULL", "archived")
-		);
+		Command.data = [];
 
-		Command.data = data.map(record => new Command(record));
+		if (!sb.Config) {
+			console.warn("sb.Config module missing - cannot load commands");
+			return;
+		}
+		else if (!sb.Config.has("SPM_COMMAND_DIRECTORY", false)) {
+			console.warn("SPM commands directory not configured - cannot load commands");
+			return;
+		}
+
+		const commandDirectoryList = await Command.getCommandDirectories();
+		for (const directory of commandDirectoryList) {
+			const filePath = Command.getCommandFilePath(directory);
+			delete require.cache[require.resolve(filePath)];
+
+			try {
+				const commandDefinition = require(filePath);
+				const commandData = new Command(commandDefinition);
+				Command.data.push(directory, commandData);
+			}
+			catch (e) {
+				console.warn("Could not load command", {
+					cause: e,
+					command: directory
+				});
+			}
+		}
 
 		if (Command.data.length === 0) {
 			console.warn("No commands initialized - bot will not respond to any command queries");
 		}
-
-		if (!sb.Config) {
-			console.warn("sb.Config module missing - cannot fetch command prefix");
-		}
-		else if (Command.prefix === null) {
+		if (Command.prefix === null) {
 			console.warn("Command prefix is configured as `null` - bot will not respond to any command queries");
-		}
-
-		const names = Command.data.map(i => [i.Name, ...i.Aliases]).flat();
-		const duplicates = names.filter((i, ind, arr) => arr.indexOf(i) !== ind);
-		for (const dupe of duplicates) {
-			const affected = Command.data.filter(i => i.Aliases.includes(dupe));
-			for (const command of affected) {
-				const index = command.Aliases.indexOf(dupe);
-				command.Aliases.splice(index, 1);
-				console.warn(`Removed duplicate command name "${dupe}" from command ${command.Name}'s aliases`);
-			}
 		}
 	}
 
 	/**
 	 * Reloads a specific list of commands.
 	 * @param {string[]} list
-	 * @returns {Promise<void>} True if passed, false if
-	 * @throws {sb.Error} If the list contains 0 valid commands
+	 * @returns {Promise<void>}
 	 */
 	static async reloadSpecific (...list) {
-		const reloadingCommands = list.map(i => Command.get(i)).filter(Boolean);
-		if (reloadingCommands.length === 0) {
-			throw new sb.Error({
-				message: "No valid commands provided"
-			});
-		}
+		const dirList = await Command.getCommandDirectories();
+		const reloadList = dirList.filter(i => list.includes(i));
 
-		const data = await sb.Query.getRecordset(rs => rs
-			.select("*")
-			.from("chat_data", "Command")
-			.where("ID IN %n+", reloadingCommands.map(i => i.ID))
-			.where("Flags NOT %*like* OR Flags IS NULL", "archived")
-		);
+		for (const commandName of reloadList) {
+			const filePath = Command.getCommandFilePath(commandName);
+			delete require.cache[require.resolve(filePath)];
 
-		for (const record of data) {
-			const existingIndex = Command.data.findIndex(i => i.ID === record.ID);
-			Command.data[existingIndex].destroy();
-			Command.data[existingIndex] = new Command(record);
+			let commandData;
+			try {
+				const commandDefinition = require(filePath);
+				commandData = new Command(commandDefinition);
+			}
+			catch (e) {
+				console.warn("Could not reload command", {
+					cause: e,
+					command: commandName
+				});
+
+				continue;
+			}
+
+			const currentCommandData = Command.get(commandName);
+			const index = Command.data.indexOf(currentCommandData);
+			if (index !== -1) {
+				currentCommandData.destroy();
+				Command.data.splice(index, 1);
+			}
+
+			Command.data.push(commandData);
 		}
 	}
 
 	/**
 	 * Searches for a command, based on its ID, Name or Alias.
 	 * Returns immediately if identifier is already a Command.
-	 * @param {Command|number|string|symbol} identifier
+	 * @param {Command|string|symbol} identifier
 	 * @returns {Command|null}
 	 * @throws {sb.Error} If identifier is unrecognized
 	 */
@@ -303,14 +289,11 @@ module.exports = class Command extends require("./template.js") {
 		if (identifier instanceof Command) {
 			return identifier;
 		}
-		else if (typeof identifier === "number" || typeof identifier === "symbol") {
-			return Command.data.find(command => command.ID === identifier);
-		}
 		else if (typeof identifier === "string") {
-			return Command.data.find(command =>
-				command.Name === identifier ||
-				command.Aliases.includes(identifier)
-			);
+			return Command.data.find(i => i.Name === identifier || i.Aliases.includes(identifier));
+		}
+		else if (typeof identifier === "symbol") {
+			return Command.data.find(i => i.Name === identifier);
 		}
 		else {
 			throw new sb.Error({
@@ -332,22 +315,30 @@ module.exports = class Command extends require("./template.js") {
 	 */
 	static async checkAndExecute (identifier, argumentArray, channelData, userData, options = {}) {
 		if (!identifier) {
-			return {success: false, reason: "no-identifier"};
+			return {
+				success: false,
+				reason: "no-identifier"
+			};
+		}
+		else if (channelData?.Mode === "Inactive" || channelData?.Mode === "Read") {
+			return {
+				success: false,
+				reason: "channel-" + channelData.Mode.toLowerCase()
+			};
+		}
+
+		const command = Command.get(identifier);
+		if (!command) {
+			return {
+				success: false,
+				reason: "no-command"
+			};
 		}
 
 		if (!Array.isArray(argumentArray)) {
 			throw new sb.Error({
 				message: "Command arguments must be provided as an array"
 			});
-		}
-
-		if (channelData?.Mode === "Inactive" || channelData?.Mode === "Read") {
-			return {success: false, reason: "channel-" + channelData.Mode.toLowerCase()};
-		}
-
-		const command = Command.get(identifier);
-		if (!command) {
-			return {success: false, reason: "no-command"};
 		}
 
 		// Check for cooldowns, return if it did not pass yet.
@@ -358,7 +349,7 @@ module.exports = class Command extends require("./template.js") {
 			&& !sb.CooldownManager.check(
 				channelID,
 				userData.ID,
-				command.ID,
+				command.Name,
 				Boolean(options.skipPending)
 			)
 		) {
@@ -372,7 +363,10 @@ module.exports = class Command extends require("./template.js") {
 				}
 			}
 
-			return { success: false, reason: "cooldown" };
+			return {
+				success: false,
+				reason: "cooldown"
+			};
 		}
 
 		// If skipPending flag is set, do not set the pending status at all.
@@ -395,7 +389,7 @@ module.exports = class Command extends require("./template.js") {
 
 		if (!filterData.success) {
 			sb.CooldownManager.unsetPending(userData.ID);
-			sb.CooldownManager.set(channelID, userData.ID, command.ID, command.Cooldown);
+			sb.CooldownManager.set(channelID, userData.ID, command.Name, command.Cooldown);
 			await sb.Runtime.incrementRejectedCommands();
 
 			if (filterData.filter.Response === "Reason" && typeof filterData.reply === "string") {
@@ -474,10 +468,10 @@ module.exports = class Command extends require("./template.js") {
 
 			await sb.Runtime.incrementCommandsCounter();
 
-			if (typeof command.ID === "number") {
+			if (typeof command.Name === "string") {
 				sb.Logger.logCommandExecution({
 					User_Alias: userData.ID,
-					Command: command.ID,
+					Command: command.Name,
 					Platform: options.platform.ID,
 					Executed: new sb.Date(),
 					Channel: channelData?.ID ?? null,
@@ -512,10 +506,10 @@ module.exports = class Command extends require("./template.js") {
 			}
 			else {
 				console.error(e);
-				if (typeof command.ID === "number") {
+				if (typeof command.Name === "string") {
 					const loggingContext = {
 						user: userData.ID,
-						command: command.ID,
+						command: command.Name,
 						invocation: identifier,
 						channel: channelData?.ID ?? null,
 						platform: options.platform.ID,
@@ -551,7 +545,7 @@ module.exports = class Command extends require("./template.js") {
 
 		// This should be removed once all deprecated calls are refactored
 		if (channelData && execution?.meta?.skipCooldown === true) {
-			console.warn("Deprecated return value - skipCooldown (use cooldown: null instead)", command.ID);
+			console.warn("Deprecated return value - skipCooldown (use cooldown: null instead)", command.Name);
 		}
 
 		// Check if a link-only flagged command returns a proper link to be used, if the command didn't fail
@@ -560,7 +554,7 @@ module.exports = class Command extends require("./template.js") {
 				throw new sb.Error({
 					message: "Commands supporting link-only mode must always return a possible link as string or null",
 					args: {
-						command: command.ID
+						command: command.Name
 					}
 				});
 			}
@@ -611,7 +605,7 @@ module.exports = class Command extends require("./template.js") {
 		}
 
 		if (typeof execution.reply !== "string") {
-			console.warn(`Execution of command ${command.ID} did not result with execution.reply of type string`, {command, execution, data: context});
+			console.warn(`Execution of command ${command.Name} did not result with execution.reply of type string`, {command, execution, data: context});
 		}
 
 		execution.reply = String(execution.reply);
@@ -691,7 +685,7 @@ module.exports = class Command extends require("./template.js") {
 
 		if (commandData.Flags.ownerOverride && channelData?.isUserChannelOwner(userData)) {
 			// Set a very small, only technical cooldown
-			sb.CooldownManager.set(channelID, userData.ID, commandData.ID, 500);
+			sb.CooldownManager.set(channelID, userData.ID, commandData.Name, 500);
 		}
 		else if (typeof cooldownData !== "undefined") {
 			if (cooldownData !== null) {
@@ -707,7 +701,7 @@ module.exports = class Command extends require("./template.js") {
 					const {
 						channel = channelID,
 						user = userData.ID,
-						command = commandData.ID,
+						command = commandData.Name,
 						length,
 						options = {}
 					} = cooldown;
@@ -720,74 +714,20 @@ module.exports = class Command extends require("./template.js") {
 			}
 		}
 		else {
-			sb.CooldownManager.set(channelID, userData.ID, commandData.ID, commandData.Cooldown);
+			sb.CooldownManager.set(channelID, userData.ID, commandData.Name, commandData.Cooldown);
 		}
 
 		sb.CooldownManager.unsetPending(userData.ID);
 	}
 
-	static async install (options = {}) {
-		let data = null;
-		if (options.filePath) {
-			data = require(options.filePath);
-		}
-		else {
-			const Module = require("module");
-			const mod = new Module();
-			mod._compile(options.data, "");
-			data = mod.exports;
-		}
+	static async getCommandDirectories () {
+		const spmPath = path.resolve(sb.Config.get("SPM_COMMAND_DIRECTORY"));
+		return await fs.promises.readdir(spmPath);
+	}
 
-		const conflictingAliases = Command.data.filter(i => i.Aliases.includes(data.Name));
-		if (conflictingAliases.length > 0) {
-			return {
-				success: false,
-				result: "conflicting-alias"
-			};
-		}
-
-		let result = "";
-		const conflictIndex = Command.data.findIndex(i => i.Name === data.Name);
-		if (conflictIndex !== -1) {
-			if (options.override) {
-				const previous = Command.data[conflictIndex];
-				Command.data[conflictIndex] = new Command({
-					ID: previous.ID,
-					...data
-				});
-
-				const row = await sb.Query.getRow("chat_data", "Command");
-				await row.load(previous.ID);
-				row.setValues(data);
-				await row.save();
-
-				previous.destroy();
-				result = "updated";
-			}
-			else {
-				return {
-					success: false,
-					reason: "conflicting-name"
-				};
-			}
-		}
-		else {
-			const row = await sb.Query.getRow("chat_data", "Command");
-			row.setValues(data);
-			await row.save();
-
-			Command.data.push(new Command({
-				ID: row.values.ID,
-				...data
-			}));
-
-			result = "added";
-		}
-
-		return {
-			success: true,
-			result
-		};
+	static getCommandFilePath (name) {
+		const spmPath = path.resolve(sb.Config.get("SPM_COMMAND_DIRECTORY"));
+		return path.join(spmPath, name, "index.js");
 	}
 
 	/**

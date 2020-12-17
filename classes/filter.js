@@ -26,8 +26,8 @@ module.exports = class Filter extends require("./template.js") {
 		this.Channel = data.Channel;
 
 		/**
-		 * Unique numeric command identifier
-		 * @type {Command.ID|null}
+		 * Unique command identifier
+		 * @type {string|null}
 		 */
 		this.Command = data.Command;
 
@@ -164,7 +164,7 @@ module.exports = class Filter extends require("./template.js") {
 		const localFilters = Filter.data.filter(row => (
 			row.Active
 			&& (row.Channel === (channel?.ID ?? null) || row.Channel === null)
-			&& (row.Command === (command?.ID ?? null) || row.Command === null)
+			&& (row.Command === (command?.Name ?? null) || row.Command === null)
 			&& (row.Platform === (platform?.ID ?? null) || row.Platform === null)
 		));
 
