@@ -13,7 +13,7 @@ class Context {
 	#meta = new Map();
 	#userFlags = {};
 
-	constructor (command, data = {}) {
+	constructor(command, data = {}) {
 		this.#command = command;
 		this.#invocation = data.invocation ?? null;
 		this.#user = data.user ?? null;
@@ -35,10 +35,10 @@ class Context {
 		});
 	}
 
-	getMeta (name) { return this.#meta.get(name); }
-	setMeta (name, value) { this.#meta.set(name, value); }
+	getMeta(name) { return this.#meta.get(name); }
+	setMeta(name, value) { this.#meta.set(name, value); }
 
-	getMentionStatus () {
+	getMentionStatus() {
 		return sb.Filter.getMentionStatus({
 			user: this.#user,
 			command: this.#command,
@@ -47,7 +47,7 @@ class Context {
 		});
 	}
 
-	async sendIntermediateMessage (string) {
+	async sendIntermediateMessage(string) {
 		if (this.#channel) {
 			await Promise.all([
 				this.#channel.send(string),
@@ -59,7 +59,7 @@ class Context {
 		}
 	}
 
-	async getUserPermissions (options = {}) {
+	async getUserPermissions(options = {}) {
 		const userData = options.user ?? this.#user;
 		const channelData = options.channel ?? this.#channel;
 		const platformData = options.platform ?? this.#platform;
@@ -101,7 +101,7 @@ class Context {
 		};
 	}
 
-	async getBestAvailableEmote (emotes, fallback, options = {}) {
+	async getBestAvailableEmote(emotes, fallback, options = {}) {
 		const channelData = options.channel ?? this.#channel;
 		const platformData = options.platform ?? this.#platform;
 		if (channelData) {
@@ -114,16 +114,16 @@ class Context {
 		return "(no emote found)";
 	}
 
-	get tee () { return this.#append.tee; }
-	get invocation () { return this.#invocation; }
-	get user () { return this.#user; }
-	get channel () { return this.#channel; }
-	get platform () { return this.#platform; }
-	get transaction () { return this.#transaction; }
-	get privateMessage () { return this.#privateMessage; }
-	get append () { return this.#append; }
-	get params () { return this.#params; }
-	get userFlags () { return this.#userFlags; }
+	get tee() { return this.#append.tee; }
+	get invocation() { return this.#invocation; }
+	get user() { return this.#user; }
+	get channel() { return this.#channel; }
+	get platform() { return this.#platform; }
+	get transaction() { return this.#transaction; }
+	get privateMessage() { return this.#privateMessage; }
+	get append() { return this.#append; }
+	get params() { return this.#params; }
+	get userFlags() { return this.#userFlags; }
 }
 
 class Command extends require("./template.js") {
@@ -151,7 +151,7 @@ class Command extends require("./template.js") {
 
 	static ignoreParametersDelimiter = "--";
 
-	constructor (data) {
+	constructor(data) {
 		super();
 
 		this.Name = data.Name;
@@ -294,7 +294,7 @@ class Command extends require("./template.js") {
 		sb.Utils.deepFreeze(this.staticData);
 	}
 
-	destroy () {
+	destroy() {
 		if (typeof this.staticData.destroy === "function") {
 			try {
 				this.staticData.destroy(this);
@@ -309,11 +309,11 @@ class Command extends require("./template.js") {
 		this.staticData = null;
 	}
 
-	execute (...args) {
+	execute(...args) {
 		return this.Code(...args);
 	}
 
-	async getDynamicDescription () {
+	async getDynamicDescription() {
 		if (!this.Dynamic_Description) {
 			return null;
 		}
@@ -322,7 +322,7 @@ class Command extends require("./template.js") {
 		}
 	}
 
-	getDetailURL (options = {}) {
+	getDetailURL(options = {}) {
 		if (options.useCodePath) {
 			const baseURL = sb.Config.get("COMMAND_DETAIL_CODE_URL", false);
 			if (!baseURL) {
@@ -341,29 +341,29 @@ class Command extends require("./template.js") {
 		}
 	}
 
-	getCacheKey () {
+	getCacheKey() {
 		return `sb-command-${this.Name}`;
 	}
 
-	get Author () { return this.#Author; }
+	get Author() { return this.#Author; }
 
-	static async initialize () {
+	static async initialize() {
 		// Override the default template behaviour of automatically calling `loadData()` by doing nothing.
 		// This is new (experimental) behaviour, where the commands' definitions will be loaded externally!
 		return this;
 	}
 
-	static async importData (definitions) {
+	static async importData(definitions) {
 		super.importData(definitions);
 		await this.validate();
 	}
 
-	static async importSpecific (...definitions) {
+	static async importSpecific(...definitions) {
 		super.genericImportSpecific(...definitions);
 		await this.validate();
 	}
 
-	static invalidateRequireCache (requireBasePath, ...names) {
+	static invalidateRequireCache(requireBasePath, ...names) {
 		return super.genericInvalidateRequireCache({
 			names,
 			requireBasePath,
@@ -379,7 +379,7 @@ class Command extends require("./template.js") {
 		});
 	}
 
-	static async validate () {
+	static async validate() {
 		if (Command.data.length === 0) {
 			console.warn("No commands initialized - bot will not respond to any command queries");
 		}
@@ -421,7 +421,7 @@ class Command extends require("./template.js") {
 		await Promise.all(addMissingRowsPromises);
 	}
 
-	static get (identifier) {
+	static get(identifier) {
 		if (identifier instanceof Command) {
 			return identifier;
 		}
@@ -439,7 +439,7 @@ class Command extends require("./template.js") {
 		}
 	}
 
-	static async checkAndExecute (identifier, argumentArray, channelData, userData, options = {}) {
+	static async checkAndExecute(identifier, argumentArray, channelData, userData, options = {}) {
 		if (!identifier) {
 			return { success: false, reason: "no-identifier" };
 		}
@@ -617,6 +617,9 @@ class Command extends require("./template.js") {
 			}
 
 			await sb.Runtime.incrementCommandsCounter();
+			sb.metrics.commandsCounter.inc({
+				name: command.Name
+			});
 
 			sb.Logger.logCommandExecution({
 				User_Alias: userData.ID,
@@ -836,7 +839,7 @@ class Command extends require("./template.js") {
 		return execution;
 	}
 
-	static handleCooldown (channelData, userData, commandData, cooldownData) {
+	static handleCooldown(channelData, userData, commandData, cooldownData) {
 		// Take care of private messages, where channel === null
 		const channelID = channelData?.ID ?? Command.#privateMessageChannelID;
 
@@ -903,7 +906,7 @@ class Command extends require("./template.js") {
 		}
 	}
 
-	static extractMetaResultProperties (execution) {
+	static extractMetaResultProperties(execution) {
 		const result = {};
 		for (const [key, value] of Object.entries(execution)) {
 			if (typeof value === "boolean") {
@@ -914,7 +917,7 @@ class Command extends require("./template.js") {
 		return result;
 	}
 
-	static parseParameter (value, type, explicit) {
+	static parseParameter(value, type, explicit) {
 		// Empty implicit string value is always invalid, since that is written as `$command param:` which is a typo/mistake
 		if (type === "string" && explicit === false && value === "") {
 			return null;
@@ -965,7 +968,7 @@ class Command extends require("./template.js") {
 		return null;
 	}
 
-	static createFakeContext (commandData, contextData = {}, extraData = {}) {
+	static createFakeContext(commandData, contextData = {}, extraData = {}) {
 		if (!(commandData instanceof Command)) {
 			throw new sb.Error({
 				message: "First provided argument must be an instance of Command",
@@ -991,7 +994,7 @@ class Command extends require("./template.js") {
 		return new Context(commandData, data);
 	}
 
-	static #parseAndAppendParameter (value, parameterDefinition, explicit, existingParameters) {
+	static #parseAndAppendParameter(value, parameterDefinition, explicit, existingParameters) {
 		const parameters = { ...existingParameters };
 		const parsedValue = Command.parseParameter(value, parameterDefinition.type, explicit);
 		if (parsedValue === null) {
@@ -1021,7 +1024,7 @@ class Command extends require("./template.js") {
 		return { success: true, newParameters: parameters };
 	}
 
-	static parseParametersFromArguments (paramsDefinition, argsArray) {
+	static parseParametersFromArguments(paramsDefinition, argsArray) {
 		const argsStr = argsArray.join(" ");
 		const outputArguments = [];
 		let parameters = {};
@@ -1051,7 +1054,7 @@ class Command extends require("./template.js") {
 				}
 
 				if (char === ":") {
-					currentParam = paramsDefinition.find(i => i.name === buffer.slice(0,-1)) ?? null;
+					currentParam = paramsDefinition.find(i => i.name === buffer.slice(0, -1)) ?? null;
 					if (currentParam) {
 						insideParam = true;
 						buffer = "";
@@ -1133,7 +1136,7 @@ class Command extends require("./template.js") {
 		};
 	}
 
-	static is (string) {
+	static is(string) {
 		const prefix = Command.getPrefix();
 		if (prefix === null) {
 			return false;
@@ -1142,7 +1145,7 @@ class Command extends require("./template.js") {
 		return (string.startsWith(prefix) && string.trim().length > prefix.length);
 	}
 
-	static destroy () {
+	static destroy() {
 		for (const command of Command.data) {
 			command.destroy();
 		}
@@ -1150,7 +1153,7 @@ class Command extends require("./template.js") {
 		super.destroy();
 	}
 
-	static get prefixRegex () {
+	static get prefixRegex() {
 		const prefix = Command.prefix;
 		if (!prefix) {
 			return null;
@@ -1164,19 +1167,19 @@ class Command extends require("./template.js") {
 		return new RegExp(`^${body}`);
 	}
 
-	static get prefix () {
+	static get prefix() {
 		return Command.getPrefix();
 	}
 
-	static set prefix (value) {
+	static set prefix(value) {
 		Command.setPrefix(value);
 	}
 
-	static getPrefix () {
+	static getPrefix() {
 		return sb.Config.get("COMMAND_PREFIX", false) ?? null;
 	}
 
-	static setPrefix (value) {
+	static setPrefix(value) {
 		if (typeof value !== "string") {
 			throw new sb.Error({
 				message: "Command prefix must be a string!"
